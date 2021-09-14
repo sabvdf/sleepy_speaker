@@ -1,6 +1,10 @@
 # import the pygame module, so you can use it
 import pygame
+from flask import *
+from threading import Thread
+from waitress import serve
 import yaml
+import json
 config = yaml.safe_load(open("config.yml"))
 version = "0.2.12"
 
@@ -9,19 +13,59 @@ print("Loaded config");
 print("Default volume: "+str(config["default_volume"]));
 print("Resume last volume: "+str(config["resume_last_volume"]));
 
+global volume
+global playing
+
 volume = config["default_volume"]
 playing = False
+
+api = Flask(__name__)
+
+@api.route("/", methods=["GET"])
+def home():
+    global playing
+    global volume
+    return Response(json.dumps({'playing': playing, 'volume': volume}, sort_keys=False, indent=4), mimetype='text/json')
+
+@api.route("/set/<int:vol>", methods=["GET"])
+def set(vol):
+    global playing
+    global volume
+    if(vol == 0):
+        stop()
+    else:
+        play_at_volume(vol / 255.0)
+    return Response(json.dumps({'playing': playing, 'volume': volume}, sort_keys=False, indent=4), mimetype='text/json')
+    
+@api.route("/fade/<int:vol>/<int:ms>", methods=["GET"])
+def fade(vol, ms):
+    global playing
+    global volume
+    if(vol == 0):
+        stop()
+    else:
+        fade_to_volume(vol / 255.0, ms)
+    return Response(json.dumps({'playing': playing, 'volume': volume}, sort_keys=False, indent=4), mimetype='text/json')
+    
+def run_server():
+    serve(api, host="0.0.0.0", port=5000)
 
 def play():
     pygame.mixer.music.load("HeavyRain.ogg")
     pygame.mixer.music.play(-1, 10.0, 2000)
 
+def fadein(ms):
+    pygame.mixer.music.load("HeavyRain.ogg")
+    pygame.mixer.music.play(-1, 10.0, ms)
+
 def stop():
+    global playing
     playing = False
     pygame.mixer.music.fadeout(2000)
     
 
 def set_volume(vol):
+    global volume
     if(vol < 0.0):
         vol = 0.0
     if(vol > 1.0):
@@ -30,13 +74,28 @@ def set_volume(vol):
     pygame.mixer.music.set_volume(vol)
     
 def play_at_volume(vol):
+    global playing
     if not playing:
         playing = True
         play()
     set_volume(vol)
 
+def fade_to_volume(vol, ms):
+    global playing
+    if not playing:
+        playing = True
+        fadein(ms)
+    set_volume(vol)
+
 
 def main():
+#   Preparing parameters for flask to be given in the thread so that it doesn't collide with main thread
+#    kwargs = {'host': '0.0.0.0', 'port': 5000, 'threaded': True, 'use_reloader': False, 'debug': False}
+#   running flask thread
+#    flaskThread = Thread(target=api.run, daemon=True, kwargs=kwargs).start()
+    
+    waitressThread = Thread(target=run_server, daemon=True).start()
+        
     pygame.init()
     
     running = True
